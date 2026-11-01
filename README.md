@@ -33,6 +33,8 @@ git worktree-fast forget "$base"   # Optional. Frees the cache when you’re don
 
 Keep the cache if you expect to start more branches from that commit. Unprepared revisions and unsupported setups, including active checkout hooks, use stock Git. The cached path requires the source cache and new worktree to be on the same APFS volume.
 
+Preparing a commit can also reuse its prepared first parent. Unchanged files share APFS blocks, even across local commits you have never pushed. Run `git worktree-fast auto enable` to prepare new commits in the background and retain the three most recent on each local branch. Change the per-branch limit with `git worktree-fast auto keep N`. [Automatic preparation and cleanup](docs/usage.md#prepare-local-commits-automatically)
+
 ## Speed and storage
 
 The charts compare a standard Git worktree, the tracked-source cache in this tool, and an exact Rift snapshot of a clean T3 Code checkout. **Rift gives the snapshot its own Git metadata.** Git and worktree-fast both create linked worktrees that share the repository’s history and refs. Choose the behavior you need as well as the timing.

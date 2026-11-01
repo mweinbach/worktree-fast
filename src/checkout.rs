@@ -43,7 +43,7 @@ fn run_git(args: &[OsString]) -> Result<ExitCode> {
     Err(git().arg("worktree").args(args).exec().into())
 }
 
-fn valid_oid(id: &str) -> bool {
+pub(crate) fn valid_oid(id: &str) -> bool {
     matches!(id.len(), 40 | 64) && id.bytes().all(|v| matches!(v, b'0'..=b'9' | b'a'..=b'f'))
 }
 
@@ -60,7 +60,7 @@ fn commit_id(revision: &OsStr) -> Result<String> {
     Ok(id.into())
 }
 
-fn cache_root(common: &Path) -> Result<PathBuf> {
+pub(crate) fn cache_root(common: &Path) -> Result<PathBuf> {
     let base = env::var_os("XDG_CACHE_HOME")
         .filter(|s| !s.is_empty())
         .map(PathBuf::from)
@@ -156,6 +156,41 @@ fn can_prime_index() -> Result<bool> {
     Ok(true)
 }
 
+// These cannot change checkout bytes or the seed's index. Hook and index-stat
+// settings are checked again on every add. Unlisted core settings stay sealed.
+const OUTSIDE_CHECKOUT: &[&[u8]] = &[
+    b"core.abbrev",
+    b"core.askpass",
+    b"core.bigfilethreshold",
+    b"core.commentchar",
+    b"core.commentstring",
+    b"core.commitgraph",
+    b"core.compression",
+    b"core.deltabasecachelimit",
+    b"core.editor",
+    b"core.excludesfile",
+    b"core.filesreflocktimeout",
+    b"core.fsync",
+    b"core.fsyncmethod",
+    b"core.fsyncobjectfiles",
+    b"core.gitproxy",
+    b"core.hookspath",
+    b"core.logallrefupdates",
+    b"core.loosecompression",
+    b"core.multipackindex",
+    b"core.notesref",
+    b"core.packedgitlimit",
+    b"core.packedgitwindowsize",
+    b"core.packedrefstimeout",
+    b"core.pager",
+    b"core.preloadindex",
+    b"core.quotepath",
+    b"core.sshcommand",
+    b"core.untrackedcache",
+    b"core.warnambiguousrefs",
+    b"core.whitespace",
+];
+
 fn context(common: &Path) -> Result<Option<String>> {
     const OVERRIDES: &[&str] = &[
         "GIT_DIR",
@@ -228,6 +263,7 @@ fn context(common: &Path) -> Result<Option<String>> {
                     | b"checkout.workers"
                     | b"checkout.thresholdforparallelism"
             )
+            && !OUTSIDE_CHECKOUT.contains(&key)
         {
             hash.update(record);
             hash.update([0]);
@@ -244,6 +280,9 @@ struct Priming {
 
 #[derive(Serialize, Deserialize)]
 struct Seed {
+    // Entries written by older releases were all explicitly prepared.
+    #[serde(default)]
+    auto_only: bool,
     #[serde(default)]
     priming: Option<Priming>,
     common_dev: u64,
@@ -327,7 +366,119 @@ pub(crate) fn check_filters(common: &Path, oid: &str) -> Result<()> {
     Ok(())
 }
 
-fn prepare(root: &Path, common: &Path, oid: &str) -> Result<()> {
+fn seed_git(common: &Path, seed: &Path, args: &[&str]) -> Result<()> {
+    output(
+        git()
+            .current_dir(seed.join("tree"))
+            .env("GIT_INDEX_FILE", seed.join("index"))
+            .env("GIT_INDEX_VERSION", "2")
+            .args([
+                "-c",
+                "core.hooksPath=/dev/null",
+                "-c",
+                "core.splitIndex=false",
+                "-c",
+                "index.version=2",
+                "-c",
+                "index.skipHash=false",
+                "-c",
+                "index.threads=1",
+                "-c",
+                "core.untrackedCache=false",
+                "-c",
+                "core.fsmonitor=false",
+            ])
+            .arg("--git-dir")
+            .arg(common)
+            .arg("--work-tree")
+            .arg(seed.join("tree"))
+            .args(args),
+    )?;
+    Ok(())
+}
+
+fn git_paths(oid: &str) -> Result<Vec<u8>> {
+    output(git().args(["ls-tree", "--full-tree", "-rtz", "--name-only", oid]))
+}
+
+fn prepare_from_parent(
+    root: &Path,
+    common: &Path,
+    oid: &str,
+    context: &str,
+    seed: &Path,
+) -> Result<Option<String>> {
+    let Ok(parent) = commit_id(OsStr::new(&format!("{oid}^1"))) else {
+        return Ok(None);
+    };
+    let source = root.join(&parent);
+    if !source.is_dir() {
+        return Ok(None);
+    }
+    let original = Seed::read(&source, common, &parent, false)?;
+    let Some(priming) = &original.priming else {
+        return Ok(None);
+    };
+    if original.context != context {
+        return Ok(None);
+    }
+    // Attribute edits can change the checkout bytes of otherwise identical blobs.
+    let changed = output(git().args([
+        "diff-tree",
+        "--no-commit-id",
+        "--no-renames",
+        "--no-relative",
+        "--ignore-submodules=none",
+        "--name-only",
+        "-r",
+        "-z",
+        &parent,
+        oid,
+        "--",
+    ]))?;
+    if changed.split(|&c| c == 0).any(|p| {
+        p.rsplit(|&c| c == b'/')
+            .next()
+            .is_some_and(|name| name.eq_ignore_ascii_case(b".gitattributes"))
+    }) {
+        return Ok(None);
+    }
+    let index = read_template(&source, priming).context("invalid parent index")?;
+    DirBuilder::new().mode(0o700).create(seed)?;
+    let tree = seed.join("tree");
+    let parent_tree = source.join("tree");
+    crate::apfs::clone_seed(&parent_tree, &tree, original.tree_dev, original.tree_ino)?;
+    // Authenticate the source after cloning. Never adopt extra files or a
+    // filesystem's collapsed spelling from an otherwise valid cold checkout.
+    let actual =
+        crate::checkout_proof::fingerprint_paths(&parent_tree, Some(&git_paths(&parent)?))?;
+    ensure!(actual == priming.tree_seal, "parent checkout cache changed");
+    fs::write(seed.join("index"), index)?;
+    seed_git(
+        common,
+        seed,
+        &[
+            "read-tree",
+            "--reset",
+            "-u",
+            "--no-sparse-checkout",
+            "--no-recurse-submodules",
+            &parent,
+            oid,
+        ],
+    )?;
+    let seal = crate::checkout_proof::fingerprint_paths(&tree, Some(&git_paths(oid)?))?;
+    // Keep the usual fresh Git template, independent of the temporary merge index.
+    fs::remove_file(seed.join("index"))?;
+    seed_git(
+        common,
+        seed,
+        &["read-tree", "--reset", "--no-sparse-checkout", oid],
+    )?;
+    Ok(Some(seal))
+}
+
+fn prepare(root: &Path, common: &Path, oid: &str, automatic: bool) -> Result<()> {
     let seal = context(common)?
         .context("this Git environment does not support prepared APFS checkouts")?;
     DirBuilder::new().recursive(true).mode(0o700).create(root)?;
@@ -338,8 +489,10 @@ fn prepare(root: &Path, common: &Path, oid: &str) -> Result<()> {
         "interrupted cleanup; run forget again"
     );
     let replacing = dest.try_exists()?;
+    let mut auto_only = automatic;
     if replacing {
-        let previous = Seed::read(&dest, common, oid, false)?;
+        let mut previous = Seed::read(&dest, common, oid, false)?;
+        auto_only &= previous.auto_only;
         if previous.context == seal
             && let Some(priming) = &previous.priming
             && crate::checkout_proof::fingerprint(&dest.join("tree"))
@@ -348,57 +501,61 @@ fn prepare(root: &Path, common: &Path, oid: &str) -> Result<()> {
                 == Some(&priming.tree_seal)
             && read_template(&dest, priming).is_some()
         {
+            if previous.auto_only && !automatic {
+                previous.auto_only = false;
+                let marker = tempfile::NamedTempFile::new_in(root)?;
+                serde_json::to_writer(marker.as_file(), &previous)?;
+                marker.persist(dest.join("seed.json"))?;
+            }
             return Ok(());
         }
-        // Rebuild an old or damaged cache from Git objects. Never bless cached bytes.
+        // Never bless the damaged entry's existing bytes.
     }
     let tmp = Builder::new().prefix(".prepare-").tempdir_in(root)?;
     check_filters(common, oid)?;
-    let seed = tmp.path().join("seed");
-    let tree = seed.join("tree");
-    DirBuilder::new().mode(0o700).create(&seed)?;
-    fs::create_dir(&tree)?;
-    for args in [
-        &["read-tree", "--reset", "--no-sparse-checkout", oid][..],
-        &["checkout-index", "--all"][..],
-    ] {
-        output(
-            git()
-                .current_dir(&tree)
-                .env("GIT_INDEX_FILE", tmp.path().join("index"))
-                .env("GIT_INDEX_VERSION", "2")
-                .args([
-                    "-c",
-                    "core.hooksPath=/dev/null",
-                    "-c",
-                    "core.splitIndex=false",
-                    "-c",
-                    "index.version=2",
-                    "-c",
-                    "index.skipHash=false",
-                    "-c",
-                    "index.threads=1",
-                    "-c",
-                    "core.untrackedCache=false",
-                    "-c",
-                    "core.fsmonitor=false",
-                ])
-                .arg("--git-dir")
-                .arg(common)
-                .arg("--work-tree")
-                .arg(&tree)
-                .args(args),
+    let attempt = tmp.path().join("incremental");
+    let incremental = prepare_from_parent(root, common, oid, &seal, &attempt);
+    let (seed, tree_seal) = if let Ok(Some(tree_seal)) = incremental {
+        if env::var_os("WORKTREE_FAST_TRACE").as_deref() == Some(OsStr::new("1")) {
+            let _ = writeln!(
+                io::stderr(),
+                "git-worktree-fast: prepared from first-parent APFS checkout cache"
+            );
+        }
+        (attempt, tree_seal)
+    } else {
+        if let Err(error) = incremental
+            && env::var_os("WORKTREE_FAST_TRACE").as_deref() == Some(OsStr::new("1"))
+        {
+            let _ = writeln!(
+                io::stderr(),
+                "git-worktree-fast: preparing from Git objects: {error:#}"
+            );
+        }
+        if attempt.exists() {
+            fs::remove_dir_all(&attempt)?;
+        }
+        let seed = tmp.path().join("full");
+        DirBuilder::new().mode(0o700).create(&seed)?;
+        let tree = seed.join("tree");
+        fs::create_dir(&tree)?;
+        seed_git(
+            common,
+            &seed,
+            &["read-tree", "--reset", "--no-sparse-checkout", oid],
         )?;
-    }
+        seed_git(common, &seed, &["checkout-index", "--all"])?;
+        (seed, crate::checkout_proof::fingerprint(&tree)?)
+    };
     let stat = common.metadata()?;
-    let m = tree.metadata()?;
+    let m = seed.join("tree").metadata()?;
     let template = seed.join("index");
-    fs::rename(tmp.path().join("index"), &template)?;
     let priming = Priming {
-        tree_seal: crate::checkout_proof::fingerprint(&tree)?,
+        tree_seal,
         index_sha256: hex::encode(Sha256::digest(fs::read(&template)?)),
     };
     let marker = Seed {
+        auto_only,
         priming: Some(priming),
         common_dev: stat.dev(),
         common_ino: stat.ino(),
@@ -435,6 +592,36 @@ fn remove_tree(path: &Path, device: u64) -> Result<()> {
 fn forget(root: &Path, common: &Path, oid: &str) -> Result<()> {
     let _lock = lock(root, true)?;
     forget_locked(root, common, oid)
+}
+
+pub(crate) fn prepare_automatic(common: &Path, oid: &str) -> Result<()> {
+    ensure!(valid_oid(oid), "invalid automatic preparation commit");
+    prepare(&cache_root(common)?, common, oid, true)
+}
+
+pub(crate) fn forget_automatic(common: &Path, oid: &str) -> Result<()> {
+    ensure!(valid_oid(oid), "invalid automatic preparation commit");
+    let root = cache_root(common)?;
+    if root.is_dir() {
+        let _lock = lock(&root, true)?;
+        let seed = root.join(oid);
+        let retiring = root.join(format!(".forget-{oid}"));
+        let auto_only = if seed.try_exists()? {
+            Seed::read(&seed, common, oid, false)?.auto_only
+        } else if retiring.try_exists()? {
+            // A previous retirement can stop after the initial rename, or
+            // after deleting its manifest but before removing the empty dir.
+            fs::symlink_metadata(&retiring)?.is_dir()
+                && (fs::read_dir(&retiring)?.next().is_none()
+                    || Seed::read(&retiring, common, oid, true)?.auto_only)
+        } else {
+            false
+        };
+        if auto_only {
+            forget_locked(&root, common, oid)?;
+        }
+    }
+    Ok(())
 }
 
 fn forget_locked(root: &Path, common: &Path, oid: &str) -> Result<()> {
@@ -632,7 +819,7 @@ fn cached_add(
     let Some(name) = dest.file_name() else {
         return Ok(None);
     };
-    if !root.is_dir() || !parent.is_dir() || fs::symlink_metadata(dest).is_ok() {
+    if !root.is_dir() || fs::symlink_metadata(dest).is_ok() {
         return Ok(None);
     }
     let Some(Candidate { oid, implicit_new }) = candidate(args, form, name) else {
@@ -654,6 +841,10 @@ fn cached_add(
         || !can_prime_index()?
         || has_hooks(common, &tree, dest)?
     {
+        return Ok(None);
+    }
+    // Stock Git creates missing leading directories; a failure keeps its diagnostics.
+    if !parent.is_dir() && fs::create_dir_all(parent).is_err() {
         return Ok(None);
     }
     let tmp = Builder::new()
@@ -851,7 +1042,7 @@ pub fn run(args: &[OsString]) -> Result<ExitCode> {
         commit_id(rev)?
     };
     match verb {
-        "prepare" => prepare(&root, &common, &oid)?,
+        "prepare" => prepare(&root, &common, &oid, false)?,
         "forget" => forget(&root, &common, &oid)?,
         _ => unreachable!(),
     };

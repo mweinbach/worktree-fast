@@ -217,11 +217,6 @@ fn default_success_streams_and_reset_state_match_stock_git() {
             "+refs/heads/*:refs/remotes/origin/*",
         ]);
         repo.git(&["update-ref", "refs/remotes/origin/upstream", "past"]);
-        // core.abbrev is part of the conservative cache configuration seal.
-        for base in ["main", "past"] {
-            success(repo.run(FAST, &["forget", base]));
-            success(repo.run(FAST, &["prepare", base]));
-        }
     }
     for (dir, flags, rev) in [
         ("implicit", vec![], None),
@@ -264,4 +259,45 @@ fn changing_worker_count_does_not_invalidate_prepared_bytes() {
     r.add(&["add", s(&dest), "past"], true);
     assert_eq!(r.git(&["-C", s(&dest), "branch", "--show-current"]), "past");
     r.git(&["worktree", "remove", s(&dest)]);
+}
+
+#[test]
+fn only_checkout_settings_invalidate_prepared_bytes() {
+    let r = Repo::new();
+    for (key, value) in [
+        ("core.editor", "vi"),
+        ("core.pager", "cat"),
+        ("core.abbrev", "12"),
+        ("core.quotePath", "false"),
+        ("core.fsyncMethod", "batch"),
+    ] {
+        r.git(&["config", key, value]);
+    }
+    let dest = r.dest("unrelated");
+    r.add(&["add", "--detach", s(&dest), "past"], true);
+    r.git(&["worktree", "remove", s(&dest)]);
+
+    r.git(&["config", "core.autocrlf", "true"]);
+    r.add(&["add", "--detach", s(&dest), "past"], false);
+    assert_eq!(fs::read(dest.join("file")).unwrap(), b"old");
+    r.git(&["worktree", "remove", s(&dest)]);
+}
+
+#[test]
+fn missing_parent_directories_are_created_like_git() {
+    let r = Repo::new();
+    let dest = r.dest("worktrees/source/topic");
+    r.add(&["add", "-b", "topic", "--", s(&dest), "past"], true);
+    assert_eq!(fs::read(dest.join("file")).unwrap(), b"old");
+    assert_eq!(r.git(&["-C", s(&dest), "status", "--porcelain"]), "");
+    r.git(&["worktree", "remove", s(&dest)]);
+
+    let blocked = r.dest("blocker");
+    fs::write(&blocked, b"").unwrap();
+    let target = blocked.join("child");
+    let fast = r.run(FAST, &["add", "--detach", s(&target), "past"]);
+    let native = r.run("git", &["worktree", "add", "--detach", s(&target), "past"]);
+    assert!(!native.status.success());
+    assert_eq!(fast.status, native.status);
+    assert_eq!(fast.stderr, native.stderr);
 }

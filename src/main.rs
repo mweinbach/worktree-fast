@@ -1,4 +1,5 @@
 mod apfs;
+mod auto_prepare;
 mod checkout;
 mod checkout_proof;
 mod deps;
@@ -22,6 +23,7 @@ const HELP: &str = "git worktree-fast — accelerate ordinary Git worktrees on A
   git worktree-fast add -b BRANCH PATH [REV]           Create a native worktree
   git worktree-fast add --detach PATH [REV]            Create a detached worktree
   git worktree-fast forget [REV]                       Delete the source cache
+  git worktree-fast auto --help                        Configure automatic preparation and retention
   git worktree-fast deps prepare [--repo REPO]         Prepare the T3 package store
   git worktree-fast setup [--fallback] [CHECKOUT]      Set up an existing T3/Git checkout
   git worktree-fast deps retire [--repo REPO]          Retire an unused package store
@@ -45,6 +47,7 @@ fn run(args: &[OsString]) -> anyhow::Result<ExitCode> {
         return Ok(ExitCode::SUCCESS);
     }
     match command.and_then(OsStr::to_str) {
+        Some("auto") => auto_prepare::run(&args[1..]),
         Some("deps") => setup::run(&args[1..]),
         Some("setup") => setup::run(args),
         Some("pool") => pool::run(&args[1..]),

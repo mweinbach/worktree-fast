@@ -16,10 +16,14 @@ flowchart LR
     A -.->|stock Git on a cache miss| E
 ```
 
-1. **Prepare a commit.** Git materializes its tracked files in a fresh cache
-   directory using a temporary index. A repository identifier and the full
-   commit ID select the cache entry. Your staged changes, local edits and
-   untracked files stay in the original checkout.
+1. **Prepare a commit.** A repository identifier and the full commit ID select
+   the cache entry. On the first preparation, Git writes the tracked files into
+   a private directory. If the commit's first parent already has a compatible
+   entry, the tool clones that tree, verifies the parent after cloning, and uses
+   Git to apply the differences to the clone. It checks the exact file and
+   directory names against the target Git tree and builds a fresh index template.
+   A changed `.gitattributes`, a damaged parent, or a path spelling the filesystem
+   can't reproduce triggers a full checkout. Both paths use only committed files.
 2. **Clone and verify.** APFS can give a new file its own identity while
    sharing its data blocks with the prepared file. An edit allocates changed
    blocks for the file being written. The tool checks the source directory's

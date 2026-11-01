@@ -45,6 +45,57 @@ keep before removing the directory, including any untracked work. Save any
 ignored files you need elsewhere. You can forget the prepared source while
 worktrees created from it are still open.
 
+## Prepare local commits automatically
+
+On macOS with APFS, enable background preparation in the repository where you
+make commits. The setting applies to its linked worktrees too.
+
+```sh
+git worktree-fast auto enable       # Keep three commits per branch by default.
+# Make a commit on a local branch, then inspect the queue and the prepared commits.
+git worktree-fast auto status
+git worktree-fast add --detach ../review HEAD
+```
+
+The local `post-commit` hook records the branch name and commit SHA. The worker
+keeps each branch's most recently prepared commits, including commits made in a
+linked worktree. During a burst it can skip commits that have already aged out
+of that branch's queue. A failed preparation leaves the previous successful caches
+available. Worktrees are created when you run `add`. To warm the existing tip
+immediately, run `git worktree-fast prepare HEAD`. You can prepare detached
+commits the same way.
+
+One repository setting controls how many commits each branch keeps.
+
+```sh
+git worktree-fast auto enable --keep 5
+git worktree-fast auto keep 2       # Trim every branch to its two newest entries now.
+```
+
+The limit accepts any positive integer. Increasing it provides room for future
+commits. `auto disable` stops the hook and preserves both the current caches and
+the configured limit for the next time you enable it.
+
+If the first parent is already prepared, unchanged files share APFS blocks
+across commits. Each entry still needs its own filesystem metadata and index,
+and Git may write an entire changed file. A missing or incompatible parent
+triggers an ordinary full preparation. Run `WORKTREE_FAST_TRACE=1 git worktree-fast
+prepare <commit>` to see when the tool reuses a parent.
+
+If two branches retain the same SHA, they share one cache entry until it ages
+out of both. The next worker run or retention change releases entries belonging
+only to deleted branches. A new branch builds its history as you commit. Run
+`git worktree-fast prepare <commit>` to keep a particular cache even after its
+commit ages out of the window. That explicit cache stays until you `forget` it.
+
+If you already have a file-based `post-commit` hook or a custom `core.hooksPath`, add
+`git worktree-fast auto notify` to your existing post-commit action and run
+`git worktree-fast auto enable --existing-hook`. The default installer leaves
+existing hooks in place. Disabling the integration removes an unmodified hook
+installed by this tool. You control the hook in existing-hook mode.
+The checkout cache currently requires file-based hooks for repositories that use
+hooks. Git's `hook.*` configuration is unsupported.
+
 ## Choose where a worktree starts
 
 These are independent examples. Use a fresh destination for each add.
@@ -69,7 +120,10 @@ A hit prints `git-worktree-fast: created from APFS checkout cache` on stderr.
 Use a non-quiet add for this check. If a successful add prints only ordinary
 Git output, Git performed the checkout itself. Common reasons are an unprepared
 revision, a destination on another volume, a checkout hook, or a sparse
-checkout. Run `prepare` again to rebuild an outdated source entry. If Git
+checkout. Changing a Git setting that can alter checked-out files, such as
+`core.autocrlf`, `core.eol` or a filter, also makes the prepared entry
+outdated. Settings like `core.editor`, `core.pager` and `core.abbrev` don't.
+Run `prepare` again to rebuild an outdated source entry. If Git
 cannot discover the command at all, check that `command -v git-worktree-fast`
 finds the installed executable.
 

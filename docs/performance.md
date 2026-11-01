@@ -48,6 +48,12 @@ After all four worktrees were removed and the cache was forgotten, the worktree-
 
 Writing to a clone can allocate more blocks. These figures describe clean workspaces at the tested commit. A package install or a large edit will change the result. [Apple’s explanation of APFS clones](https://developer.apple.com/documentation/foundation/about-apple-file-system)
 
+## Preparing consecutive local commits
+
+On the same 29,044-path T3 Code revision, we appended one newline to `README.md` and committed it locally. Both commits existed before each measurement. We prepared the parent, recorded the APFS container allocation, then prepared the child and measured the additional blocks. Each trial used a fresh dedicated volume.
+
+The first prepared commit used **408.53 MiB**. Preparing its child consumed another **408.57 MiB** with the previous implementation and **14.63 MiB** with first-parent reuse, a **96.4% reduction** in the child's disk cost. These are medians of three trials per implementation. Each resulting worktree matched the child commit and remained clean after forgetting the parent. A larger changed file can require more space because Git can rewrite the whole file. [Raw measurements and test conditions](../benchmarks/t3-incremental-preparation.json)
+
 ## Repeat the comparison
 
 On macOS, install `git-worktree-fast` and [Rift v0.0.13](https://github.com/anomalyco/rift/releases/tag/v0.0.13). From the worktree-fast repository, fetch the benchmark commit into a new sibling directory on APFS and run the driver. The driver reads the source repository, creates disposable fixtures beside it, and uses macOS’s `hdiutil` and `diskutil` for the storage phase. Progress goes to stderr and the raw report goes to stdout.

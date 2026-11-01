@@ -6,14 +6,28 @@
 //! inode. Access times are deliberately excluded: normal reads may change them.
 use anyhow::{Result, ensure};
 use sha2::{Digest, Sha256};
-use std::{fs, os::unix::ffi::OsStrExt, os::unix::fs::MetadataExt, path::Path};
+use std::{
+    collections::HashSet, fs, os::unix::ffi::OsStrExt, os::unix::fs::MetadataExt, path::Path,
+};
 use walkdir::WalkDir;
 
 /// The signedness and little-endian encoding are part of this seal's format.
 /// Names are length-prefixed native bytes, so newline and non-UTF-8 names work.
 pub(crate) fn fingerprint(tree: &Path) -> Result<String> {
+    fingerprint_paths(tree, None)
+}
+
+/// For an incremental checkout also require an exact match to Git's inventory,
+/// including directory spelling on case- and normalization-insensitive volumes.
+pub(crate) fn fingerprint_paths(tree: &Path, git_paths: Option<&[u8]>) -> Result<String> {
     let root = fs::symlink_metadata(tree)?;
     ensure!(root.is_dir(), "cache tree is not a directory");
+    let mut expected = git_paths.map(|paths| {
+        paths
+            .split(|&c| c == 0)
+            .filter(|p| !p.is_empty())
+            .collect::<HashSet<_>>()
+    });
     let mut hash = Sha256::new();
     hash.update(b"worktree-fast/checkout-tree/v1\0");
     for entry in WalkDir::new(tree)
@@ -28,6 +42,11 @@ pub(crate) fn fingerprint(tree: &Path) -> Result<String> {
             "unexpected object in the checkout cache"
         );
         let name = entry.path().strip_prefix(tree)?.as_os_str().as_bytes();
+        if !name.is_empty()
+            && let Some(names) = &mut expected
+        {
+            ensure!(names.remove(name), "checkout path differs from Git's tree");
+        }
         hash.update((name.len() as u64).to_le_bytes());
         hash.update(name);
         hash.update(m.dev().to_le_bytes());
@@ -39,6 +58,10 @@ pub(crate) fn fingerprint(tree: &Path) -> Result<String> {
         hash.update(m.ctime().to_le_bytes());
         hash.update(m.ctime_nsec().to_le_bytes());
     }
+    ensure!(
+        expected.is_none_or(|names| names.is_empty()),
+        "missing checkout paths"
+    );
     Ok(hex::encode(hash.finalize()))
 }
 

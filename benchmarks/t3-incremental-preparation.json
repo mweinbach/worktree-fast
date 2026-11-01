@@ -1,0 +1,90 @@
+{
+  "measured_at": "2026-11-01",
+  "host": {
+    "cpu": "Apple M3 Ultra",
+    "model": "Mac15,14",
+    "os": "27.2",
+    "build": "26B118",
+    "git": "git version 2.54.0 (Apple Git-157)"
+  },
+  "source_repository": "https://github.com/pingdotgg/t3code",
+  "source_parent": "15fe2832727893cbdd2214383f9f971474849695",
+  "local_child": "63f053ee4806218ca8598b6200d45fd9918f4e47",
+  "tracked_paths": 29044,
+  "child_change": "Append one newline byte to README.md",
+  "measurement": "Fresh dedicated 8 GiB APFS sparse image per trial. Sample occupied container bytes after three identical readings. Each reported cost is incremental to the prior phase. Both commits already exist when measurement starts. Preparation time is wall time for only that CLI command. Trials were sequential within each implementation and were not interleaved between versions. Other work ran on the host during the measurement.",
+  "validation": "Every trial created a worktree via the cache, verified the child revision, clean status, tracked contents and modes with a fresh index, and absence of unexpected ignored files. Forgotten parent left clean live worktree. Removed the worktree and both seeds and verified directory and Git registrations, then detached and removed the trial image.",
+  "baseline_source": "7a943d6cdc9da93d9fe39d844116f7073c595fb6",
+  "groups": {
+    "full": {
+      "binary_sha256": "5fd270f23304d331dbb0aa355123cbda878bf5153fb8cb7f03e63627020ab6e2",
+      "trials": [
+        {
+          "trial": 1,
+          "parent_prepare_seconds": 7.988639625022188,
+          "parent_added_bytes": 428367872,
+          "child_prepare_seconds": 9.197638000012375,
+          "child_added_bytes": 428412928,
+          "child_first_parent_cache_hit": false
+        },
+        {
+          "trial": 2,
+          "parent_prepare_seconds": 8.360024583002087,
+          "parent_added_bytes": 428371968,
+          "child_prepare_seconds": 7.5741963750333525,
+          "child_added_bytes": 428412928,
+          "child_first_parent_cache_hit": false
+        },
+        {
+          "trial": 3,
+          "parent_prepare_seconds": 13.817944333015475,
+          "parent_added_bytes": 428371968,
+          "child_prepare_seconds": 13.79442516702693,
+          "child_added_bytes": 428429312,
+          "child_first_parent_cache_hit": false
+        }
+      ],
+      "medians": {
+        "parent_prepare_seconds": 8.360024583002087,
+        "parent_added_bytes": 428371968,
+        "child_prepare_seconds": 9.197638000012375,
+        "child_added_bytes": 428412928
+      }
+    },
+    "incremental": {
+      "binary_sha256": "1b18f7029763a80c1fb6a8c635b84daecea552b8337a0aa43552e36fbc341915",
+      "trials": [
+        {
+          "trial": 1,
+          "parent_prepare_seconds": 12.82073970802594,
+          "parent_added_bytes": 428371968,
+          "child_prepare_seconds": 3.5749438750208355,
+          "child_added_bytes": 15343616,
+          "child_first_parent_cache_hit": true
+        },
+        {
+          "trial": 2,
+          "parent_prepare_seconds": 12.962904250016436,
+          "parent_added_bytes": 428376064,
+          "child_prepare_seconds": 3.437694208987523,
+          "child_added_bytes": 15347712,
+          "child_first_parent_cache_hit": true
+        },
+        {
+          "trial": 3,
+          "parent_prepare_seconds": 10.662989459000528,
+          "parent_added_bytes": 428371968,
+          "child_prepare_seconds": 3.6514249999891035,
+          "child_added_bytes": 15343616,
+          "child_first_parent_cache_hit": true
+        }
+      ],
+      "medians": {
+        "parent_prepare_seconds": 12.82073970802594,
+        "parent_added_bytes": 428371968,
+        "child_prepare_seconds": 3.5749438750208355,
+        "child_added_bytes": 15343616
+      }
+    }
+  }
+}
