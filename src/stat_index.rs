@@ -107,8 +107,9 @@ fn filled(template: &[u8], payload: &Path, hash_len: usize) -> Result<(Vec<u8>, 
             st.gid(),
             stat_size,
         ];
-        for (word, value) in entry[..40].chunks_exact_mut(4).zip(fields) {
-            word.copy_from_slice(&value.to_be_bytes());
+        let (words, _) = entry[..40].as_chunks_mut::<4>();
+        for (word, value) in words.iter_mut().zip(fields) {
+            *word = value.to_be_bytes();
         }
         newest_ctime = newest_ctime.max(st.ctime());
         pos += padded;
