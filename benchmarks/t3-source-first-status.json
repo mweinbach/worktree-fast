@@ -1,0 +1,27 @@
+{
+  "add": {
+    "refresh/sum_scan": [],
+    "refresh/sum_lstat": [],
+    "preload/sum_lstat": [],
+    "read/cache_nr": [
+      "29044",
+      "29044"
+    ]
+  },
+  "status": {
+    "refresh/sum_scan": [
+      "0"
+    ],
+    "refresh/sum_lstat": [
+      "2"
+    ],
+    "preload/sum_lstat": [
+      "29042"
+    ],
+    "read/cache_nr": [
+      "29044"
+    ]
+  },
+  "commit": "15fe2832727893cbdd2214383f9f971474849695",
+  "branch": "human-branch"
+}

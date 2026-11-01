@@ -1,0 +1,59 @@
+{
+  "arch": "aarch64",
+  "checkout_workers": null,
+  "commit": "15fe2832727893cbdd2214383f9f971474849695",
+  "forget_s": 3.543052,
+  "git": "git version 2.54.0 (Apple Git-157)",
+  "jobs": 8,
+  "median_add_and_status_s": {
+    "apfs": 6.553257896,
+    "git": 15.7202703545
+  },
+  "met_min_speedup": true,
+  "min_speedup": 1.5,
+  "os": "macos",
+  "prepare_s": 3.896287584,
+  "rounds": 2,
+  "samples": [
+    {
+      "add_and_status_s": 16.449531375,
+      "add_s": 13.275189459,
+      "first_status_s": 3.174341916,
+      "lifecycle_s": 32.018204083,
+      "mode": "git",
+      "remove_s": 15.568672708,
+      "round": 1
+    },
+    {
+      "add_and_status_s": 6.563289376,
+      "add_s": 4.839398417,
+      "first_status_s": 1.723890959,
+      "lifecycle_s": 15.291887542,
+      "mode": "apfs",
+      "remove_s": 8.728598166,
+      "round": 1
+    },
+    {
+      "add_and_status_s": 6.5432264159999995,
+      "add_s": 4.533473333,
+      "first_status_s": 2.009753083,
+      "lifecycle_s": 15.740915249,
+      "mode": "apfs",
+      "remove_s": 9.197688833,
+      "round": 2
+    },
+    {
+      "add_and_status_s": 14.991009334000001,
+      "add_s": 12.337120625,
+      "first_status_s": 2.653888709,
+      "lifecycle_s": 29.896528625000002,
+      "mode": "git",
+      "remove_s": 14.905519291,
+      "round": 2
+    }
+  ],
+  "schema": 1,
+  "speedup": 2.398848115545001,
+  "timing_scope": "sum of batch phase wall times; excludes cache preparation, retirement, HEAD and registration checks",
+  "workload": "tracked files, detached worktrees, no install"
+}

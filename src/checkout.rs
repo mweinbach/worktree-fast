@@ -6,7 +6,7 @@ use sha2::{Digest, Sha256};
 use std::env;
 use std::ffi::{OsStr, OsString};
 use std::fs::{self, DirBuilder, File, OpenOptions};
-use std::io;
+use std::io::{self, Write};
 use std::os::unix::ffi::{OsStrExt, OsStringExt};
 use std::os::unix::fs::{DirBuilderExt, MetadataExt, OpenOptionsExt};
 use std::os::unix::process::CommandExt;
@@ -126,6 +126,36 @@ fn lock(root: &Path, write: bool) -> Result<File> {
     Ok(file)
 }
 
+// Preserve user-selected index formats and stat policies that differ from
+// the template. Native Git handles them, including its shared-repo permissions.
+fn can_prime_index() -> Result<bool> {
+    if env::var_os("GIT_INDEX_VERSION").is_some() {
+        return Ok(false);
+    }
+    let config = output(git().args(["config", "--null", "--list"]))?;
+    for record in config.split(|&v| v == 0) {
+        let mut parts = record.splitn(2, |&v| v == b'\n');
+        let key = parts.next().unwrap_or_default();
+        let value = parts.next().unwrap_or(b"true").to_ascii_lowercase();
+        let yes = matches!(value.as_slice(), b"true" | b"yes" | b"on" | b"1");
+        let no = matches!(value.as_slice(), b"false" | b"no" | b"off" | b"0" | b"");
+        let allowed = match key {
+            b"core.trustctime" => yes,
+            b"core.checkstat" => value == b"default",
+            b"index.version" => value == b"2",
+            b"core.sharedrepository" => no || value == b"umask",
+            b"core.splitindex" | b"core.ignorestat" | b"feature.manyfiles" | b"index.skiphash" => {
+                no
+            }
+            _ => true,
+        };
+        if !allowed {
+            return Ok(false);
+        }
+    }
+    Ok(true)
+}
+
 fn context(common: &Path) -> Result<Option<String>> {
     const OVERRIDES: &[&str] = &[
         "GIT_DIR",
@@ -193,7 +223,10 @@ fn context(common: &Path) -> Result<Option<String>> {
         .any(|s| key.starts_with(s))
             && !matches!(
                 key,
-                b"core.repositoryformatversion" | b"extensions.relativeworktrees"
+                b"core.repositoryformatversion"
+                    | b"extensions.relativeworktrees"
+                    | b"checkout.workers"
+                    | b"checkout.thresholdforparallelism"
             )
         {
             hash.update(record);
@@ -204,7 +237,15 @@ fn context(common: &Path) -> Result<Option<String>> {
 }
 
 #[derive(Serialize, Deserialize)]
+struct Priming {
+    tree_seal: String,
+    index_sha256: String,
+}
+
+#[derive(Serialize, Deserialize)]
 struct Seed {
+    #[serde(default)]
+    priming: Option<Priming>,
     common_dev: u64,
     common_ino: u64,
     commit: String,
@@ -230,7 +271,9 @@ impl Seed {
         for entry in fs::read_dir(dir)? {
             let name = entry?.file_name();
             ensure!(
-                name == "seed.json" || name == "tree",
+                name == "seed.json"
+                    || name == "tree"
+                    || (seed.priming.is_some() && name == "index"),
                 "unowned file in checkout cache"
             );
         }
@@ -294,12 +337,20 @@ fn prepare(root: &Path, common: &Path, oid: &str) -> Result<()> {
         !root.join(format!(".forget-{oid}")).try_exists()?,
         "interrupted cleanup; run forget again"
     );
-    if dest.try_exists()? {
-        ensure!(
-            Seed::read(&dest, common, oid, false)?.context == seal,
-            "checkout settings changed; forget the old seed first"
-        );
-        return Ok(());
+    let replacing = dest.try_exists()?;
+    if replacing {
+        let previous = Seed::read(&dest, common, oid, false)?;
+        if previous.context == seal
+            && let Some(priming) = &previous.priming
+            && crate::checkout_proof::fingerprint(&dest.join("tree"))
+                .ok()
+                .as_ref()
+                == Some(&priming.tree_seal)
+            && read_template(&dest, priming).is_some()
+        {
+            return Ok(());
+        }
+        // Rebuild an old or damaged cache from Git objects. Never bless cached bytes.
     }
     let tmp = Builder::new().prefix(".prepare-").tempdir_in(root)?;
     check_filters(common, oid)?;
@@ -315,11 +366,20 @@ fn prepare(root: &Path, common: &Path, oid: &str) -> Result<()> {
             git()
                 .current_dir(&tree)
                 .env("GIT_INDEX_FILE", tmp.path().join("index"))
+                .env("GIT_INDEX_VERSION", "2")
                 .args([
                     "-c",
                     "core.hooksPath=/dev/null",
                     "-c",
                     "core.splitIndex=false",
+                    "-c",
+                    "index.version=2",
+                    "-c",
+                    "index.skipHash=false",
+                    "-c",
+                    "index.threads=1",
+                    "-c",
+                    "core.untrackedCache=false",
                     "-c",
                     "core.fsmonitor=false",
                 ])
@@ -332,7 +392,14 @@ fn prepare(root: &Path, common: &Path, oid: &str) -> Result<()> {
     }
     let stat = common.metadata()?;
     let m = tree.metadata()?;
+    let template = seed.join("index");
+    fs::rename(tmp.path().join("index"), &template)?;
+    let priming = Priming {
+        tree_seal: crate::checkout_proof::fingerprint(&tree)?,
+        index_sha256: hex::encode(Sha256::digest(fs::read(&template)?)),
+    };
     let marker = Seed {
+        priming: Some(priming),
         common_dev: stat.dev(),
         common_ino: stat.ino(),
         commit: oid.into(),
@@ -341,6 +408,9 @@ fn prepare(root: &Path, common: &Path, oid: &str) -> Result<()> {
         tree_ino: m.ino(),
     };
     serde_json::to_writer(File::create(seed.join("seed.json"))?, &marker)?;
+    if replacing {
+        forget_locked(root, common, oid)?;
+    }
     fs::rename(seed, dest)?;
     Ok(())
 }
@@ -364,6 +434,10 @@ fn remove_tree(path: &Path, device: u64) -> Result<()> {
 
 fn forget(root: &Path, common: &Path, oid: &str) -> Result<()> {
     let _lock = lock(root, true)?;
+    forget_locked(root, common, oid)
+}
+
+fn forget_locked(root: &Path, common: &Path, oid: &str) -> Result<()> {
     let seed = root.join(oid);
     let retiring = root.join(format!(".forget-{oid}"));
     if seed.try_exists()? {
@@ -383,9 +457,27 @@ fn forget(root: &Path, common: &Path, oid: &str) -> Result<()> {
     if retiring.join("tree").try_exists()? {
         remove_tree(&retiring.join("tree"), meta.tree_dev)?;
     }
+    if meta.priming.is_some() && fs::symlink_metadata(retiring.join("index")).is_ok() {
+        fs::remove_file(retiring.join("index"))?;
+    }
     fs::remove_file(retiring.join("seed.json"))?;
     fs::remove_dir(retiring)?;
     Ok(())
+}
+
+fn read_template(seed: &Path, priming: &Priming) -> Option<Vec<u8>> {
+    use std::io::Read;
+    let mut file = OpenOptions::new()
+        .read(true)
+        .custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK)
+        .open(seed.join("index"))
+        .ok()?;
+    if !file.metadata().ok()?.is_file() {
+        return None;
+    }
+    let mut bytes = Vec::new();
+    file.read_to_end(&mut bytes).ok()?;
+    (hex::encode(Sha256::digest(&bytes)) == priming.index_sha256).then_some(bytes)
 }
 
 fn has_hooks(common: &Path, tree: &Path, dest: &Path) -> Result<bool> {
@@ -430,80 +522,229 @@ fn has_hooks(common: &Path, tree: &Path, dest: &Path) -> Result<bool> {
     }))
 }
 
+// Parse only forms that preserve their meaning with --no-checkout and a staging
+// path of the same basename. Git handles the full option grammar on a miss.
+struct AddForm<'a> {
+    path: usize,
+    branch: Option<&'a OsStr>,
+    detach: bool,
+    quiet: bool,
+}
+
+fn add_form(args: &[OsString]) -> Option<AddForm<'_>> {
+    if args.first()? != "add" {
+        return None;
+    }
+    let mut form = AddForm {
+        path: 1,
+        branch: None,
+        detach: false,
+        quiet: false,
+    };
+    while let Some(value) = args.get(form.path) {
+        match value.as_bytes() {
+            b"--" => {
+                form.path += 1;
+                break;
+            }
+            b"-d" | b"--detach" if form.branch.is_none() => form.detach = true,
+            b"-b" if !form.detach && form.branch.is_none() => {
+                form.path += 1;
+                form.branch = Some(args.get(form.path)?.as_os_str());
+            }
+            b"-q" | b"--quiet" => form.quiet = true,
+            b"--track" | b"--no-track" | b"--relative-paths" | b"--no-relative-paths" => (),
+            flag if flag.starts_with(b"-") => return None,
+            _ => break,
+        }
+        form.path += 1;
+    }
+    (matches!(args.len() - form.path, 1 | 2)
+        && !args
+            .get(form.path + 1)
+            .is_some_and(|r| r.as_bytes().starts_with(b"-")))
+    .then_some(form)
+}
+
+struct Candidate<'a> {
+    oid: String,
+    // Passing an explicit -b for an implicit *new* branch proves ownership
+    // even if another worktree races to create the same branch.
+    implicit_new: Option<&'a OsStr>,
+}
+
+fn candidate<'a>(args: &[OsString], form: &AddForm<'_>, name: &'a OsStr) -> Option<Candidate<'a>> {
+    if let Some(rev) = args.get(form.path + 1) {
+        return Some(Candidate {
+            oid: commit_id(rev).ok()?,
+            implicit_new: None,
+        });
+    }
+    if form.branch.is_some() || form.detach {
+        return Some(Candidate {
+            oid: commit_id(OsStr::new("HEAD")).ok()?,
+            implicit_new: None,
+        });
+    }
+    let mut local = OsString::from("refs/heads/");
+    local.push(name);
+    if let Ok(oid) = commit_id(&local) {
+        return Some(Candidate {
+            oid,
+            implicit_new: None,
+        });
+    }
+
+    // Git may set up a tracking branch instead of branching from HEAD.
+    // Delegate remote guessing (including checkout.defaultRemote) to Git.
+    let guess = output(git().args([
+        "config",
+        "--type=bool",
+        "--default=false",
+        "--get",
+        "worktree.guessRemote",
+    ]))
+    .ok()?;
+    if guess != b"false\n" {
+        return None;
+    }
+    Some(Candidate {
+        oid: commit_id(OsStr::new("HEAD")).ok()?,
+        implicit_new: Some(name),
+    })
+}
+
+fn relay(out: &Output) -> io::Result<()> {
+    io::stderr().write_all(&out.stderr)?;
+    io::stdout().write_all(&out.stdout)
+}
+
 fn cached_add(
     args: &[OsString],
-    index: usize,
+    form: &AddForm<'_>,
     dest: &Path,
     root: &Path,
     common: &Path,
-) -> Result<bool> {
+) -> Result<Option<ExitCode>> {
     let Some(parent) = dest.parent() else {
-        return Ok(false);
+        return Ok(None);
     };
     let Some(name) = dest.file_name() else {
-        return Ok(false);
+        return Ok(None);
     };
     if !root.is_dir() || !parent.is_dir() || fs::symlink_metadata(dest).is_ok() {
-        return Ok(false);
+        return Ok(None);
     }
-    let revision = args
-        .get(index + 1)
-        .map_or(OsStr::new("HEAD"), |v| v.as_os_str());
-    let oid = commit_id(revision)?;
+    let Some(Candidate { oid, implicit_new }) = candidate(args, form, name) else {
+        return Ok(None);
+    };
     let seed = root.join(&oid);
     let _lock = lock(root, false)?;
     if !seed.is_dir() {
-        return Ok(false);
+        return Ok(None);
     }
-    let original = Seed::read(&seed, common, &oid, false)?;
+    let Ok(original) = Seed::read(&seed, common, &oid, false) else {
+        return Ok(None);
+    };
     let tree = seed.join("tree");
-    if context(common)?.as_ref() != Some(&original.context) || has_hooks(common, &tree, dest)? {
-        return Ok(false);
+    let Some(priming) = &original.priming else {
+        return Ok(None);
+    };
+    if context(common)?.as_ref() != Some(&original.context)
+        || !can_prime_index()?
+        || has_hooks(common, &tree, dest)?
+    {
+        return Ok(None);
     }
     let tmp = Builder::new()
         .prefix(".worktree-fast-")
         .tempdir_in(parent)?;
     let payload = tmp.path().join("payload");
-    if let Err(e) = crate::apfs::clone_path(&tree, &payload) {
-        if matches!(
-            e.raw_os_error(),
-            Some(libc::EXDEV | libc::ENOTSUP | libc::ENOSYS | libc::EINVAL)
-        ) {
-            return Ok(false);
+    if let Err(e) = crate::apfs::clone_seed(&tree, &payload, original.tree_dev, original.tree_ino) {
+        if e.kind() == io::ErrorKind::InvalidData
+            || matches!(
+                e.raw_os_error(),
+                Some(libc::EXDEV | libc::ENOTSUP | libc::ENOSYS | libc::EINVAL)
+            )
+        {
+            return Ok(None);
         }
         return Err(e.into());
     }
+    // The syscall clones the identity-checked source directory. Validate its
+    // complete inventory *after* the clone, before touching a branch or index.
+    if crate::checkout_proof::fingerprint(&tree).ok().as_ref() != Some(&priming.tree_seal) {
+        return Ok(None);
+    }
+    let Some(template) = read_template(&seed, priming) else {
+        return Ok(None);
+    };
+    // A folded name collision or unsupported entry stays entirely native.
+    let Ok(index_data) = crate::stat_index::build(&template, &payload, oid.len() / 2) else {
+        return Ok(None);
+    };
     let container = tmp.path().join("register");
     fs::create_dir(&container)?;
     let staged = container.join(name);
     let mut options = args[1..].to_vec();
-    options[index - 1] = staged.clone().into_os_string();
+    options[form.path - 1] = staged.clone().into_os_string();
     // Only remove a branch after Git reports that we created it. Existing
     // branches, public paths and moves completed by another process survive.
-    output(
-        git()
-            .args(["worktree", "add", "--no-checkout"])
-            .args(&options),
-    )?;
-    let created = args[1] == "-b";
+    let mut register = git();
+    register.args(["worktree", "add", "--no-checkout"]);
+    if let Some(branch) = implicit_new {
+        register.arg("-b").arg(branch);
+    }
+    let registration = register.args(&options).output()?;
+    if !registration.status.success() {
+        if implicit_new.is_some() {
+            // An implicit branch may have appeared since the probe. Replay the
+            // original form at the real path, with native diagnostics.
+            return Ok(None);
+        }
+        relay(&registration)?;
+        use std::os::unix::process::ExitStatusExt;
+        let code = registration
+            .status
+            .code()
+            .unwrap_or_else(|| 128 + registration.status.signal().unwrap_or(1));
+        return Ok(Some(ExitCode::from(code as u8)));
+    }
     let actual = output(git().current_dir(&staged).args(["rev-parse", "HEAD"]))?;
     let actual = std::str::from_utf8(&actual)?.trim_end();
-    let publish = (|| -> Result<bool> {
+    let publish = (|| -> Result<Option<Output>> {
         if actual != oid {
-            return Ok(false);
+            return Ok(None);
         }
         fs::rename(staged.join(".git"), payload.join(".git"))?;
         if let Err(e) = fs::rename(&payload, &staged) {
             fs::rename(payload.join(".git"), staged.join(".git"))?;
             return Err(e.into());
         }
-        output(git().current_dir(&staged).args([
-            "-c",
-            "submodule.recurse=false",
-            "read-tree",
-            "--reset",
-            "HEAD",
+        let index = read_path(git().current_dir(&staged).args([
+            "rev-parse",
+            "--path-format=absolute",
+            "--git-path",
+            "index",
         ]))?;
+        crate::stat_index::install(&index_data, &index)?;
+        // Stock worktree add follows registration with this reset. Its own
+        // output respects locale, quiet, tracking, abbreviations and empty
+        // commit messages, and it initializes ORIG_HEAD and the reset reflog.
+        // The verified index already describes these files at their real stats.
+        let mut reset = git();
+        reset
+            .current_dir(&staged)
+            .args(["reset", "--hard", "--no-recurse-submodules"]);
+        if form.quiet {
+            reset.arg("--quiet");
+        }
+        let reset = reset.output()?;
+        ensure!(
+            reset.status.success(),
+            "git reset: {}",
+            String::from_utf8_lossy(&reset.stderr).trim_end()
+        );
         // Always pass the existing parent. Two calls targeting the same name
         // then collide; the loser cannot nest itself under the winner.
         let moved = git()
@@ -512,24 +753,37 @@ fn cached_add(
             .arg(parent)
             .output()?;
         if !moved.status.success() && staged.is_dir() && fs::symlink_metadata(dest).is_err() {
-            return Ok(false);
+            return Ok(None);
         }
         checked(moved)?;
-        Ok(true)
+        Ok(Some(reset))
     })();
-    if !matches!(publish, Ok(true)) && staged.exists() {
+    if !matches!(publish, Ok(Some(_))) && staged.exists() {
         output(
             git()
                 .args(["worktree", "remove", "--force", "--"])
                 .arg(&staged),
         )?;
-        if created {
+        if let Some(created) = form.branch.or(implicit_new) {
             let mut branch = OsString::from("refs/heads/");
-            branch.push(&args[2]);
+            branch.push(created);
             output(git().args(["update-ref", "-d"]).arg(branch).arg(actual))?;
         }
     }
-    publish
+    let Some(reset) = publish? else {
+        return Ok(None);
+    };
+    // Publication is complete. A consumer closing its output pipe must not
+    // turn the successful add into an apparent error or trigger another add.
+    let _ = relay(&registration);
+    let _ = relay(&reset);
+    if !form.quiet && env::var_os("WORKTREE_FAST_TRACE").as_deref() == Some(OsStr::new("1")) {
+        let _ = writeln!(
+            io::stderr(),
+            "git-worktree-fast: created from APFS checkout cache"
+        );
+    }
+    Ok(Some(ExitCode::SUCCESS))
 }
 
 /// Called as a Git external subcommand. Unknown forms keep Git's native behavior.
@@ -540,41 +794,51 @@ pub fn run(args: &[OsString]) -> Result<ExitCode> {
     if !matches!(verb, "prepare" | "forget" | "add" | "move") {
         return run_git(args);
     }
-    if !cfg!(target_os = "macos") && matches!(verb, "add" | "move") {
+    let native_verb = matches!(verb, "add" | "move");
+    if native_verb && !cfg!(target_os = "macos") {
         return run_git(args);
     }
     let common =
-        read_path(git().args(["rev-parse", "--path-format=absolute", "--git-common-dir"]))?
-            .canonicalize()?;
+        match read_path(git().args(["rev-parse", "--path-format=absolute", "--git-common-dir"])) {
+            Ok(path) => path.canonicalize()?,
+            Err(_) if native_verb => return run_git(args),
+            Err(err) => return Err(err),
+        };
     let root = cache_root(&common)?;
-    if verb == "add" || verb == "move" {
+    if native_verb {
         let namespace = root.ancestors().nth(2).unwrap();
-        for arg in &args[1..] {
+        let form = add_form(args);
+        // Only inspect the destination on understood forms: a revision can
+        // legally have the same name as a broken symlink in the source tree.
+        // On passthrough forms any positional argument might be the destination.
+        let possible_paths = form.as_ref().map_or(&args[1..], |f| &args[f.path..=f.path]);
+        let ns = fs::metadata(namespace).ok();
+        for arg in possible_paths {
+            let path = resolved_path(Path::new(arg))?;
+            // APFS can be case-insensitive. Compare existing ancestor inodes
+            // as well, so alternate spellings cannot put a checkout in a seed.
+            let aliases_cache = ns.as_ref().is_some_and(|ns| {
+                path.ancestors().any(|p| {
+                    fs::metadata(p).is_ok_and(|m| m.dev() == ns.dev() && m.ino() == ns.ino())
+                })
+            });
             ensure!(
-                !resolved_path(Path::new(arg))?.starts_with(namespace)
-                    && !std::path::absolute(arg)?.starts_with(namespace),
+                !path.starts_with(namespace)
+                    && !std::path::absolute(arg)?.starts_with(namespace)
+                    && !aliases_cache,
                 "a worktree must be outside the tracked checkout cache"
             );
         }
-        let index = if verb == "add" && (4..=5).contains(&args.len()) && args[1] == "-b" {
-            Some(3)
-        } else if verb == "add" && (3..=4).contains(&args.len()) && args[1] == "--detach" {
-            Some(2)
-        } else {
-            None
-        };
-        if let Some(i) = index
-            && !args[i..].iter().any(|a| a.as_bytes().starts_with(b"-"))
-            && cached_add(
+        if let Some(form) = form
+            && let Some(code) = cached_add(
                 args,
-                i,
-                &resolved_path(Path::new(&args[i]))?,
+                &form,
+                &resolved_path(Path::new(&args[form.path]))?,
                 &root,
                 &common,
             )?
         {
-            eprintln!("git-worktree-fast: created from APFS checkout cache");
-            return Ok(ExitCode::SUCCESS);
+            return Ok(code);
         }
         return run_git(args);
     }

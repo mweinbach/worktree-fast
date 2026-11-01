@@ -1,41 +1,112 @@
 {
   "arch": "aarch64",
+  "checkout_workers": null,
   "commit": "15fe2832727893cbdd2214383f9f971474849695",
-  "forget_s": 3.539862458,
+  "forget_s": 2.601165458,
   "git": "git version 2.54.0 (Apple Git-157)",
+  "median_add_and_status_s": {
+    "apfs": 1.500040667,
+    "git": 3.7950351679999996
+  },
+  "met_min_speedup": true,
+  "min_speedup": 2.0,
   "os": "macos",
-  "prepare_s": 4.058522458,
-  "rounds": 2,
+  "prepare_s": 4.202798833,
+  "rounds": 5,
   "samples": [
     {
-      "add_s": 4.131719042,
-      "first_status_s": 0.222023709,
+      "add_and_status_s": 3.7950351679999996,
+      "add_s": 3.432956584,
+      "first_status_s": 0.362078584,
+      "lifecycle_s": 6.268081542999999,
       "mode": "git",
-      "remove_s": 2.267742333,
+      "remove_s": 2.473046375,
       "round": 1
     },
     {
-      "add_s": 0.737633125,
-      "first_status_s": 4.783225,
+      "add_and_status_s": 1.366385209,
+      "add_s": 1.116560917,
+      "first_status_s": 0.249824292,
+      "lifecycle_s": 3.5248058760000003,
       "mode": "apfs",
-      "remove_s": 2.238785042,
+      "remove_s": 2.158420667,
       "round": 1
     },
     {
-      "add_s": 0.696328708,
-      "first_status_s": 4.526541292,
+      "add_and_status_s": 1.838686,
+      "add_s": 1.583919625,
+      "first_status_s": 0.254766375,
+      "lifecycle_s": 4.043827417,
       "mode": "apfs",
-      "remove_s": 2.999371625,
+      "remove_s": 2.205141417,
       "round": 2
     },
     {
-      "add_s": 3.459899041,
-      "first_status_s": 0.260438458,
+      "add_and_status_s": 4.418170541,
+      "add_s": 3.338990666,
+      "first_status_s": 1.079179875,
+      "lifecycle_s": 6.749085707000001,
       "mode": "git",
-      "remove_s": 2.5558618749999997,
+      "remove_s": 2.330915166,
       "round": 2
+    },
+    {
+      "add_and_status_s": 4.200853125,
+      "add_s": 3.375402125,
+      "first_status_s": 0.825451,
+      "lifecycle_s": 6.621487416,
+      "mode": "git",
+      "remove_s": 2.420634291,
+      "round": 3
+    },
+    {
+      "add_and_status_s": 1.500040667,
+      "add_s": 1.213338,
+      "first_status_s": 0.286702667,
+      "lifecycle_s": 3.678426334,
+      "mode": "apfs",
+      "remove_s": 2.178385667,
+      "round": 3
+    },
+    {
+      "add_and_status_s": 1.631612333,
+      "add_s": 1.396139958,
+      "first_status_s": 0.235472375,
+      "lifecycle_s": 3.808652042,
+      "mode": "apfs",
+      "remove_s": 2.1770397089999998,
+      "round": 4
+    },
+    {
+      "add_and_status_s": 3.674383292,
+      "add_s": 3.402624542,
+      "first_status_s": 0.27175875,
+      "lifecycle_s": 6.172705875,
+      "mode": "git",
+      "remove_s": 2.498322583,
+      "round": 4
+    },
+    {
+      "add_and_status_s": 3.567171708,
+      "add_s": 3.270427125,
+      "first_status_s": 0.296744583,
+      "lifecycle_s": 6.135434042,
+      "mode": "git",
+      "remove_s": 2.568262334,
+      "round": 5
+    },
+    {
+      "add_and_status_s": 1.42624725,
+      "add_s": 1.185508417,
+      "first_status_s": 0.240738833,
+      "lifecycle_s": 3.6144455000000004,
+      "mode": "apfs",
+      "remove_s": 2.18819825,
+      "round": 5
     }
   ],
   "schema": 1,
+  "speedup": 2.529954854883944,
+  "timing_scope": "paired phase sums; excludes cache preparation, retirement and validation commands",
   "workload": "tracked files, detached worktrees, no install"
 }

@@ -1,0 +1,41 @@
+{
+  "arch": "aarch64",
+  "commit": "15fe2832727893cbdd2214383f9f971474849695",
+  "forget_s": 3.539862458,
+  "git": "git version 2.54.0 (Apple Git-157)",
+  "os": "macos",
+  "prepare_s": 4.058522458,
+  "rounds": 2,
+  "samples": [
+    {
+      "add_s": 4.131719042,
+      "first_status_s": 0.222023709,
+      "mode": "git",
+      "remove_s": 2.267742333,
+      "round": 1
+    },
+    {
+      "add_s": 0.737633125,
+      "first_status_s": 4.783225,
+      "mode": "apfs",
+      "remove_s": 2.238785042,
+      "round": 1
+    },
+    {
+      "add_s": 0.696328708,
+      "first_status_s": 4.526541292,
+      "mode": "apfs",
+      "remove_s": 2.999371625,
+      "round": 2
+    },
+    {
+      "add_s": 3.459899041,
+      "first_status_s": 0.260438458,
+      "mode": "git",
+      "remove_s": 2.5558618749999997,
+      "round": 2
+    }
+  ],
+  "schema": 1,
+  "workload": "tracked files, detached worktrees, no install"
+}

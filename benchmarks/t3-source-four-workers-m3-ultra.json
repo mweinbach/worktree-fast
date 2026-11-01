@@ -1,0 +1,112 @@
+{
+  "arch": "aarch64",
+  "checkout_workers": 4,
+  "commit": "15fe2832727893cbdd2214383f9f971474849695",
+  "forget_s": 3.318504333,
+  "git": "git version 2.54.0 (Apple Git-157)",
+  "median_add_and_status_s": {
+    "apfs": 1.583127417,
+    "git": 2.831736708
+  },
+  "met_min_speedup": true,
+  "min_speedup": 1.5,
+  "os": "macos",
+  "prepare_s": 2.96158625,
+  "rounds": 5,
+  "samples": [
+    {
+      "add_and_status_s": 3.02698,
+      "add_s": 1.833446,
+      "first_status_s": 1.193534,
+      "lifecycle_s": 5.650075416,
+      "mode": "git",
+      "remove_s": 2.623095416,
+      "round": 1
+    },
+    {
+      "add_and_status_s": 1.918423458,
+      "add_s": 1.6581275,
+      "first_status_s": 0.260295958,
+      "lifecycle_s": 4.145728290999999,
+      "mode": "apfs",
+      "remove_s": 2.227304833,
+      "round": 1
+    },
+    {
+      "add_and_status_s": 1.7931828749999998,
+      "add_s": 1.52431575,
+      "first_status_s": 0.268867125,
+      "lifecycle_s": 4.031723917,
+      "mode": "apfs",
+      "remove_s": 2.238541042,
+      "round": 2
+    },
+    {
+      "add_and_status_s": 3.041892625,
+      "add_s": 1.933960083,
+      "first_status_s": 1.107932542,
+      "lifecycle_s": 5.733726292,
+      "mode": "git",
+      "remove_s": 2.691833667,
+      "round": 2
+    },
+    {
+      "add_and_status_s": 2.705455041,
+      "add_s": 1.967291083,
+      "first_status_s": 0.738163958,
+      "lifecycle_s": 6.5848171660000006,
+      "mode": "git",
+      "remove_s": 3.879362125,
+      "round": 3
+    },
+    {
+      "add_and_status_s": 1.506816916,
+      "add_s": 1.2647815,
+      "first_status_s": 0.242035416,
+      "lifecycle_s": 3.875075291,
+      "mode": "apfs",
+      "remove_s": 2.368258375,
+      "round": 3
+    },
+    {
+      "add_and_status_s": 1.533021999,
+      "add_s": 1.263200416,
+      "first_status_s": 0.269821583,
+      "lifecycle_s": 3.8132480820000003,
+      "mode": "apfs",
+      "remove_s": 2.280226083,
+      "round": 4
+    },
+    {
+      "add_and_status_s": 2.831736708,
+      "add_s": 1.7287331670000001,
+      "first_status_s": 1.103003541,
+      "lifecycle_s": 5.336483541,
+      "mode": "git",
+      "remove_s": 2.504746833,
+      "round": 4
+    },
+    {
+      "add_and_status_s": 2.1013370829999998,
+      "add_s": 1.811324167,
+      "first_status_s": 0.290012916,
+      "lifecycle_s": 4.7320512919999995,
+      "mode": "git",
+      "remove_s": 2.6307142089999997,
+      "round": 5
+    },
+    {
+      "add_and_status_s": 1.583127417,
+      "add_s": 1.3348735,
+      "first_status_s": 0.248253917,
+      "lifecycle_s": 3.8583153340000003,
+      "mode": "apfs",
+      "remove_s": 2.2751879170000002,
+      "round": 5
+    }
+  ],
+  "schema": 1,
+  "speedup": 1.788697913757374,
+  "timing_scope": "paired phase sums; excludes cache preparation, retirement and validation commands",
+  "workload": "tracked files, detached worktrees, no install"
+}

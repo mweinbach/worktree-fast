@@ -61,6 +61,7 @@ impl Fixture {
             .env("XDG_CACHE_HOME", self.tmp.path().join("cache"))
             .env("XDG_CONFIG_HOME", self.tmp.path().join("config"))
             .env("GIT_CONFIG_NOSYSTEM", "1")
+            .env("WORKTREE_FAST_TRACE", "1")
             .args(args)
             .output()
             .unwrap()

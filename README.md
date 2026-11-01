@@ -2,6 +2,10 @@
 
 Create ordinary Git worktrees on macOS using an APFS checkout cache. Each worktree has its own branch or detached HEAD, index, and writable source files. Git still owns the history, refs, worktree listing, moves, and removal.
 
+On an M3 Ultra, a warm checkout of the 29,044-path T3 Code revision plus its
+first full Git status took **1.50 s** with the cache versus **3.80 s** with
+default Git (medians of five trials). [Benchmark data and reproduction](benchmarks/README.md)
+
 The tool can prepare source files, dependencies, disk images, or complete worktrees ahead of time.
 
 | Command | What it prepares | When to use it |
@@ -31,21 +35,42 @@ The executable is `git-worktree-fast`. Git discovers it as `git worktree-fast` w
 
 ## Native Git worktrees
 
-From the repository you want to work in:
+From the repository you want to work in, prepare a revision once. Then use
+the same branch and path arguments as `git worktree add`.
 
 ```sh
 git worktree-fast prepare HEAD
-git worktree-fast add -b feature/login ../feature-login HEAD
+git worktree-fast add ../feature-login           # Existing or new branch named feature-login
 git worktree list
 git -C ../feature-login status
 
-# The prepared source is optional once the worktree exists.
+# The new worktree is independent of the prepared source.
 git worktree-fast forget HEAD
 git worktree move ../feature-login ../login
 git worktree remove ../login
 ```
 
-Prepare creates a pristine tree from Git objects in a per-repository, per-commit cache. It excludes ignored files, untracked files, local edits and the source index. On a cache hit, Darwin clones that tree and Git registers and publishes the checkout. Files initially share disk blocks and diverge as they are written. Git’s first full status refreshes the independent index. The worktree remains usable after the source cache is removed. A cache miss, active checkout hook, or an unsupported layout uses native Git. To forget a prepared revision after HEAD moves, pass its original commit ID.
+You can also use `add PATH EXISTING_BRANCH`, `add -b NEW_BRANCH PATH [REV]`,
+or `add --detach PATH [REV]`. Stage and commit changes in these checkouts
+with ordinary Git. Native Git also handles locking, unlocking, moving,
+repairing and pruning them. The normal worktree path requires no mount,
+daemon or special removal command.
+
+Prepare checks out the commit’s tracked files into a private cache, separate
+from local edits, untracked files, and the source index. On a warm add, APFS
+clones that tree. The tool verifies the cached files and directory contents and
+fills an independent Git index with the clone’s actual stat data. It waits for
+the filesystem timestamp boundary when needed so Git detects same-size edits
+even when an editor restores the old mtime. Git performs its checkout reset and
+publishes the worktree. First status can use the index immediately.
+
+Unprepared revisions, changed cache contents, checkout hooks, and unsupported
+configurations or command forms use regular Git. This includes reset-with-
+`-B`, remote branch guessing where necessary, sparse checkouts, and nondefault
+index policies. Normal output and quiet mode follow Git. Set
+`WORKTREE_FAST_TRACE=1` on a non-quiet add to see whether it used APFS. For a
+cache from version 0.1.0, rerun `prepare` to build its verification data and
+index. To forget an older prepared revision after HEAD moves, pass its commit ID.
 
 ## T3 Code and pnpm
 
@@ -114,7 +139,11 @@ cargo build --release --locked
 cargo run --release --locked --example bench -- /path/to/repo --bin ./target/release/git-worktree-fast --rounds 3
 ```
 
-The benchmark prints JSON and uses disposable checkouts. Native Git and cached trials alternate on the same revision. Creation, first full status and physical removal are separate wall times. The one-time cache preparation is reported separately. Source-cache results exclude dependency setup; dependency and image timings depend on the package graph and the host.
+The benchmark prints JSON and uses disposable checkouts. Native Git and cached trials alternate on the same revision. The report includes separate wall times for creation, first full status and physical
+removal, and paired totals from each trial. Pass `--min-speedup 2` to require a
+2× improvement in median checkout plus first status. Use `--jobs 8` for a batch
+of independent concurrent Git worktrees and `--checkout-workers 4` to compare
+both commands with Git’s four-worker checkout enabled. The one-time cache preparation is reported separately. Source-cache results exclude dependency setup; dependency and image timings depend on the package graph and the host.
 
 [M3 Ultra measurements, including first Git status and removal](benchmarks/README.md)
 

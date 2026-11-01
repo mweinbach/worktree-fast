@@ -1,11 +1,13 @@
 mod apfs;
 mod checkout;
+mod checkout_proof;
 mod deps;
 mod image;
 #[cfg(target_os = "macos")]
 mod image_deps;
 mod pool;
 mod setup;
+mod stat_index;
 
 use std::{
     env,
@@ -16,6 +18,7 @@ use std::{
 const HELP: &str = "git worktree-fast — accelerate ordinary Git worktrees on APFS
 
   git worktree-fast prepare [REV]                      Cache tracked source
+  git worktree-fast add PATH [BRANCH]                  Use normal Git branch selection
   git worktree-fast add -b BRANCH PATH [REV]           Create a native worktree
   git worktree-fast add --detach PATH [REV]            Create a detached worktree
   git worktree-fast forget [REV]                       Delete the source cache
