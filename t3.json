@@ -1,0 +1,20 @@
+{
+  "$schema": "https://t3.codes/schema/t3.json",
+  "scripts": [
+    {
+      "name": "Run Rust tests",
+      "command": "cargo test --locked --all-targets",
+      "icon": "test"
+    },
+    {
+      "name": "Check formatting and Clippy",
+      "command": "cargo fmt --all -- --check && cargo clippy --locked --all-targets -- -D warnings",
+      "icon": "lint"
+    },
+    {
+      "name": "Build release binary",
+      "command": "cargo build --release --locked",
+      "icon": "build"
+    }
+  ]
+}
