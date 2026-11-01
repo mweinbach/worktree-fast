@@ -1,5 +1,7 @@
 # T3 Code on an M3 Ultra
 
+For the three-way comparison with Rift, including disk usage, see the [performance and storage guide](../docs/performance.md).
+
 Rust release build, macOS 27.2 ARM64, APFS, Apple Git 2.54.0. The source workload was T3 Code commit `15fe2832727893cbdd2214383f9f971474849695` with 29,044 tracked paths. These local trials ran on a shared development machine.
 
 ## Source checkouts

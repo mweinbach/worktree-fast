@@ -1,152 +1,62 @@
 # git-worktree-fast
 
-Create ordinary Git worktrees on macOS using an APFS checkout cache. Each worktree has its own branch or detached HEAD, index, and writable source files. Git still owns the history, refs, worktree listing, moves, and removal.
+Keep your current branch open while you fix a bug, review a change, or give an agent a separate checkout. Git calls each of those extra working directories a *worktree*. On a Mac with APFS, `git-worktree-fast` makes repeated worktrees from the same commit quicker to open.
 
-On an M3 Ultra, a warm checkout of the 29,044-path T3 Code revision plus its
-first full Git status took **1.50 s** with the cache versus **3.80 s** with
-default Git (medians of five trials). [Benchmark data and reproduction](benchmarks/README.md)
+Prepare the commit once. The next time you add a worktree, APFS can share the prepared files’ data blocks until you write to them. You get your own writable files and Git index, and the branch appears in `git worktree list`. Use ordinary Git to commit, move, or remove it. [Browse the guides](docs/README.md).
 
-The tool can prepare source files, dependencies, disk images, or complete worktrees ahead of time.
+## Try it in a repository
 
-| Command | What it prepares | When to use it |
-| --- | --- | --- |
-| `prepare` and `add` | A tracked-files-only checkout of a commit | Repeated branches from the same revision |
-| `deps prepare` and `setup` | A verified shared pnpm installation for the T3 Code demo | Installing dependencies in worktrees created by Git, T3, or another tool |
-| `image prepare` and `image create` | A detached writable-volume template, optionally containing a complete private T3 install | Spinning up one or several isolated worktrees that can be disposed together |
-| `pool prepare` and `pool claim` | A fixed set of complete, single-use Git worktrees | Known bursts where you can provision branches before agents arrive |
-
-## Install
-
-With a recent stable Rust toolchain, Git, and the Apple Command Line Tools,
-install from GitHub:
+Install the command with a current stable Rust toolchain, Git, and the Apple Command Line Tools. Git finds the executable when Cargo’s bin directory is on your `PATH`.
 
 ```sh
 cargo install --locked --git https://github.com/mweinbach/worktree-fast.git git-worktree-fast
-```
-
-Or build directly from this checkout:
-
-```sh
-cargo install --locked --path .
 git worktree-fast --version
 ```
 
-The executable is `git-worktree-fast`. Git discovers it as `git worktree-fast` when Cargo’s bin directory is on PATH. APFS acceleration requires the cache and destination to be on the same clone-capable volume. Ordinary Git commands and unsupported add forms use the system Git. The package installer integration is specific to the audited demo revision.
+If you already cloned this project, `cargo install --locked --path .` installs your local version.
 
-## Native Git worktrees
-
-From the repository you want to work in, prepare a revision once. Then use
-the same branch and path arguments as `git worktree add`.
+From the repository you want to work in, pick a new branch name and a sibling directory.
 
 ```sh
-git worktree-fast prepare HEAD
-git worktree-fast add ../feature-login           # Existing or new branch named feature-login
-git worktree list
-git -C ../feature-login status
-
-# The new worktree is independent of the prepared source.
-git worktree-fast forget HEAD
-git worktree move ../feature-login ../login
-git worktree remove ../login
+base=$(git rev-parse HEAD)
+git worktree-fast prepare "$base"
+git worktree-fast add -b fix-login ../fix-login "$base"
+git -C ../fix-login status
 ```
 
-You can also use `add PATH EXISTING_BRANCH`, `add -b NEW_BRANCH PATH [REV]`,
-or `add --detach PATH [REV]`. Stage and commit changes in these checkouts
-with ordinary Git. Native Git also handles locking, unlocking, moving,
-repairing and pruning them. The normal worktree path requires no mount,
-daemon or special removal command.
-
-Prepare checks out the commit’s tracked files into a private cache, separate
-from local edits, untracked files, and the source index. On a warm add, APFS
-clones that tree. The tool verifies the cached files and directory contents and
-fills an independent Git index with the clone’s actual stat data. It waits for
-the filesystem timestamp boundary when needed so Git detects same-size edits
-even when an editor restores the old mtime. Git performs its checkout reset and
-publishes the worktree. First status can use the index immediately.
-
-Unprepared revisions, changed cache contents, checkout hooks, and unsupported
-configurations or command forms use regular Git. This includes reset-with-
-`-B`, remote branch guessing where necessary, sparse checkouts, and nondefault
-index policies. Normal output and quiet mode follow Git. Set
-`WORKTREE_FAST_TRACE=1` on a non-quiet add to see whether it used APFS. For a
-cache from version 0.1.0, rerun `prepare` to build its verification data and
-index. To forget an older prepared revision after HEAD moves, pass its commit ID.
-
-## T3 Code and pnpm
-
-The verified dependency recipe targets [T3 Code at 15fe2832](https://github.com/pingdotgg/t3code/commit/15fe2832727893cbdd2214383f9f971474849695). Install its pinned Node and pnpm versions and the `vp` launcher. Start with a populated pnpm content store (a normal frozen install in the demo primes it).
+Open `../fix-login` in your editor. Your original checkout stays on its current branch. Once your changes are committed, run these commands from the main checkout to clean up.
 
 ```sh
-# Inside the main T3 Code checkout:
-git worktree-fast deps prepare
-git worktree add -b feature/search ../feature-search
-git worktree-fast setup ../feature-search
+git worktree remove ../fix-login   # The fix-login branch and its commits stay in Git.
+git worktree-fast forget "$base"   # Optional. Frees the cache when you’re done with this base.
 ```
 
-The seed runs T3’s frozen installer once. Setup restores generated dependency directories and connects registry packages to a shared store. Each worktree links its four mutable mobile packages to its own source. Treat registry files in the shared store as read-only; use the image backend to edit installed registry files privately.
+Keep the cache if you expect to start more branches from that commit. Unprepared revisions and unsupported setups, including active checkout hooks, use stock Git. The cached path requires the source cache and new worktree to be on the same APFS volume.
 
-T3’s **New Worktree** action already creates the Git branch and chooses its path. In the demo project’s **Settings → Actions**, make the first **Run on worktree create** action the following command and set it to wait for completion. Use the installed binary’s absolute path if it is missing from T3’s terminal PATH.
+## Speed and storage
 
-```sh
-git worktree-fast setup --fallback
-```
+The charts compare a standard Git worktree, the tracked-source cache in this tool, and an exact Rift snapshot of a clean T3 Code checkout. **Rift gives the snapshot its own Git metadata.** Git and worktree-fast both create linked worktrees that share the repository’s history and refs. Choose the behavior you need as well as the timing.
 
-T3 passes the worktree path and project root to the action. On a fresh checkout with no usable seed, the fallback runs the project’s normal `node scripts/setup-worktree.ts` with its frozen-lockfile and setup-marker behavior. Stock Git users can run the same command with a checkout path. After a native `git worktree move`, rerun `git worktree-fast setup NEW_PATH` to refresh pnpm’s absolute paths. Git removes the worktree’s store lease when it removes the checkout. Retiring a generation with live leases is refused.
+On an M3 Ultra, Rift returned a directory in **0.36 s**. For an editor or agent that immediately calls `git status`, worktree-fast reached a clean status in **1.70 s**, stock Git in **4.15 s**, and Rift in **5.42 s**. Those are medians of three warm trials per tool, without a package install. Preparing the worktree-fast cache took **4.61 s** once.
 
-```sh
-git worktree remove ../feature-search
-git worktree-fast deps retire
-```
+![Median seconds to open a workspace through first Git status and to physically remove it, comparing stock Git, Rift, and worktree-fast](docs/assets/workspace-speed.png)
 
-The pinned T3 web config uses `URL.pathname` for its fonts alias. If a checkout
-path contains a space, Vite can look for a literal `%20` and fail during
-testing. This also reproduces with a stock frozen install. A path without
-spaces works; using Node’s `fileURLToPath` for that alias fixes the spaced
-path. [Pinned Vite config](https://github.com/pingdotgg/t3code/blob/15fe2832727893cbdd2214383f9f971474849695/apps/web/vite.config.ts#L327-L330)
+For one extra checkout, stock Git used **409 MiB** and worktree-fast used **424 MiB** including its cache. Reusing that cache for four live worktrees brought the total to **468 MiB**, compared with **1,636 MiB** for stock Git. Four Rift snapshots used **59 MiB**, the smallest footprint in this test.
 
-## APFS image worktrees
+![Additional APFS space above the source checkout for one and four live workspaces, including each tool’s retained preparation](docs/assets/workspace-storage.png)
 
-From the target Git repository, choose two new paths outside its working tree. The example creates two branches with one mount.
+[Exact numbers, storage accounting, and how to reproduce the comparison](docs/performance.md)
 
-```sh
-git worktree-fast image prepare ../source-seed --count 2
-git worktree-fast image create ../source-seed ../agent-group agent/one agent/two
-git worktree list
-# Work in the paths printed by create.
-git worktree-fast image remove ../agent-group
-git worktree-fast image retire ../source-seed
-```
+## Guides
 
-Add `--t3` at prepare time to bake the audited project-local T3 installation into the volume. Give larger groups enough virtual capacity with `--size 32g`. Cold image construction and its final writeback can take minutes. Each request clones the detached backing file, attaches the copy and registers real Git worktrees. Member payloads have separate writable files and indexes. Remove the group with the image command so its volume detaches and its backing file is unlinked. Removal keeps the named branches. Use `--discard` only to discard edits in a disposable group.
+| If you want to… | Start here |
+| --- | --- |
+| Use an existing branch, diagnose a cache miss, or clean up | [Using worktrees](docs/usage.md) |
+| Understand what is copied, shared, and verified | [How it works](docs/how-it-works.md) |
+| Ship the binary with an app or CI job, or hand off a branch | [Bundling and distribution](docs/bundling.md) |
+| Measure your own repository | [Performance guide](docs/performance.md) |
+| Build from source and run the tests | [Developer quickstart](docs/README.md#work-on-the-tool-locally) |
 
-## Prewarmed workers
+The source cache works with ordinary Git repositories. You can also group worktrees in a private APFS image or pre-create a pool for agents to claim. The pinned T3 Code demo adds the option to prepare pnpm dependencies ahead of time. [Workflows and examples](docs/usage.md)
 
-From the source repository, `git worktree-fast pool prepare ../workers 8`
-creates eight single-use branches and checkouts ahead of time. Add `--t3`
-with a prepared dependency store for package-ready checkouts. Each
-`git worktree-fast pool claim ../workers` prints a distinct, already-created
-checkout. Remove claimed worktrees with ordinary Git. Use `pool drain ../workers`
-for unused slots and `pool retire ../workers` when all slots have been removed.
-Claim latency excludes provisioning and disposal.
-
-## Test and benchmark
-
-```sh
-cargo fmt --all -- --check
-cargo clippy --locked --all-targets -- -D warnings
-cargo test --locked --all-targets
-cargo build --release --locked
-cargo run --release --locked --example bench -- /path/to/repo --bin ./target/release/git-worktree-fast --rounds 3
-```
-
-The benchmark prints JSON and uses disposable checkouts. Native Git and cached trials alternate on the same revision. The report includes separate wall times for creation, first full status and physical
-removal, and paired totals from each trial. Pass `--min-speedup 2` to require a
-2× improvement in median checkout plus first status. Use `--jobs 8` for a batch
-of independent concurrent Git worktrees and `--checkout-workers 4` to compare
-both commands with Git’s four-worker checkout enabled. The one-time cache preparation is reported separately. Source-cache results exclude dependency setup; dependency and image timings depend on the package graph and the host.
-
-[M3 Ultra measurements, including first Git status and removal](benchmarks/README.md)
-
-## License
-
-[MIT](LICENSE).
+[MIT License](LICENSE)

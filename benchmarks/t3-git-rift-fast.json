@@ -1,0 +1,153 @@
+{
+  "schema": 1,
+  "commit": "15fe2832727893cbdd2214383f9f971474849695",
+  "architecture": "arm64",
+  "machine": "Apple M3 Ultra",
+  "macos": "27.2",
+  "git": "git version 2.54.0 (Apple Git-157)",
+  "worktree_fast": "git-worktree-fast 0.1.1",
+  "rift": {
+    "release": "v0.0.13",
+    "binary_sha256": "fb2cddb01786101978926247f04b15bdee00f37ca8e5196237e3d1707a671089"
+  },
+  "measured_utc": "2026-11-01T01:55:27.248916+00:00",
+  "scope": "Source only; clean detached checkouts, same commit, default Git workers and no dependencies.",
+  "fidelity": "HEAD, clean full status, statless Git comparison, no extra ignored files except Rift's .rift marker.",
+  "tracked_paths": 29044,
+  "timing": {
+    "rounds": 3,
+    "preparation_s": {
+      "git": 0,
+      "rift": 0.008189417000000532,
+      "worktree-fast": 4.614849999999999
+    },
+    "samples": [
+      {
+        "method": "git",
+        "round": 1,
+        "create_s": 3.932491917,
+        "first_status_s": 1.055708042000001,
+        "ready_s": 4.988199959000001,
+        "remove_s": 2.601284333999999,
+        "lifecycle_s": 7.589484293
+      },
+      {
+        "method": "rift",
+        "round": 1,
+        "create_s": 0.3478770830000002,
+        "first_status_s": 5.593598708000002,
+        "ready_s": 5.941475791000002,
+        "remove_s": 1.8639254999999935,
+        "lifecycle_s": 7.8054012909999955
+      },
+      {
+        "method": "worktree-fast",
+        "round": 1,
+        "create_s": 1.6034102080000068,
+        "first_status_s": 0.2501005419999984,
+        "ready_s": 1.8535107500000052,
+        "remove_s": 2.3546318340000028,
+        "lifecycle_s": 4.208142584000008
+      },
+      {
+        "method": "rift",
+        "round": 2,
+        "create_s": 0.35964920800000044,
+        "first_status_s": 4.987938417000002,
+        "ready_s": 5.347587625000003,
+        "remove_s": 1.8442773330000009,
+        "lifecycle_s": 7.191864958000004
+      },
+      {
+        "method": "worktree-fast",
+        "round": 2,
+        "create_s": 1.4640416250000001,
+        "first_status_s": 0.23706904200000167,
+        "ready_s": 1.7011106670000018,
+        "remove_s": 2.5064792090000054,
+        "lifecycle_s": 4.207589876000007
+      },
+      {
+        "method": "git",
+        "round": 2,
+        "create_s": 3.5412985419999927,
+        "first_status_s": 0.6126258339999993,
+        "ready_s": 4.153924375999992,
+        "remove_s": 3.5774958749999968,
+        "lifecycle_s": 7.731420250999989
+      },
+      {
+        "method": "worktree-fast",
+        "round": 3,
+        "create_s": 1.1502285419999936,
+        "first_status_s": 0.23704816699999753,
+        "ready_s": 1.3872767089999911,
+        "remove_s": 2.5651485419999887,
+        "lifecycle_s": 3.9524252509999798
+      },
+      {
+        "method": "git",
+        "round": 3,
+        "create_s": 3.4545539580000053,
+        "first_status_s": 0.6820895830000069,
+        "ready_s": 4.136643541000012,
+        "remove_s": 2.740315624999994,
+        "lifecycle_s": 6.876959166000006
+      },
+      {
+        "method": "rift",
+        "round": 3,
+        "create_s": 0.38124712499998736,
+        "first_status_s": 5.034302249999996,
+        "ready_s": 5.4155493749999835,
+        "remove_s": 1.7869478749999956,
+        "lifecycle_s": 7.202497249999979
+      }
+    ]
+  },
+  "storage": {
+    "workspace_count": 4,
+    "unit": "bytes",
+    "methods": {
+      "git": {
+        "empty_used_bytes": 26402816,
+        "baseline_used_bytes": 578469888,
+        "prepared_used_bytes": 578469888,
+        "live_used_bytes": [
+          1007374336,
+          1436364800,
+          1865310208,
+          2294022144
+        ],
+        "removed_used_bytes": 581697536,
+        "retired_used_bytes": 581672960
+      },
+      "rift": {
+        "empty_used_bytes": 26402816,
+        "baseline_used_bytes": 573775872,
+        "prepared_used_bytes": 573820928,
+        "live_used_bytes": [
+          589152256,
+          604487680,
+          620326912,
+          635912192
+        ],
+        "removed_used_bytes": 575545344,
+        "retired_used_bytes": 575541248
+      },
+      "worktree-fast": {
+        "empty_used_bytes": 26402816,
+        "baseline_used_bytes": 573800448,
+        "prepared_used_bytes": 1002721280,
+        "live_used_bytes": [
+          1018249216,
+          1033535488,
+          1049489408,
+          1064546304
+        ],
+        "removed_used_bytes": 1004343296,
+        "retired_used_bytes": 576212992
+      }
+    }
+  }
+}
