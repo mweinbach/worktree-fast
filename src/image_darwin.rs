@@ -127,7 +127,7 @@ fn recover_build(dir: &Path, making_seed: bool, discard: bool) -> Result<()> {
         known.iter().all(|w| allowed.contains(w)),
         "another Git checkout was registered on this image"
     );
-    detach(&backing, &mount)?;
+    detach_once(&backing, &mount)?;
     remove_empty_mount(&mount)?;
     for w in known {
         checked(
@@ -947,7 +947,7 @@ fn remove(dir: &Path, discard: bool) -> Result<()> {
             "expected the instance to be mounted; inspect its backing image before removal"
         );
     }
-    detach(&backing, &mount)?;
+    detach_once(&backing, &mount)?;
     // The real payload stays in the backing file until all registrations have
     // been removed. A busy detach simply leaves a live instance for retry.
     if mount.try_exists()? {
@@ -1043,10 +1043,12 @@ pub(super) fn run(args: &[OsString]) -> Result<()> {
             create(Path::new(&args[1]), Path::new(&args[2]), &branches)
         }
         Some("remove") if args.len() == 2 || (args.len() == 3 && args[2] == "--discard") => {
-            remove(Path::new(&args[1]), args.len() == 3)
+            // Revalidate ownership, Git locks and edits if a busy volume stays
+            // mounted between attempts. Never force an eject.
+            retry_busy(|| remove(Path::new(&args[1]), args.len() == 3))
         }
         Some("retire") if args.len() == 2 || (args.len() == 3 && args[2] == "--discard") => {
-            retire(Path::new(&args[1]), args.len() == 3)
+            retry_busy(|| retire(Path::new(&args[1]), args.len() == 3))
         }
         _ => bail!("{}", super::USAGE),
     }

@@ -272,19 +272,62 @@ fn no_nested_mounts(root: &Path) -> Result<()> {
     }
     Ok(())
 }
+pub(super) fn retry_busy(mut op: impl FnMut() -> Result<()>) -> Result<()> {
+    for ms in [150, 450, 1000] {
+        let result = op();
+        if !result.as_ref().is_err_and(|err| {
+            err.downcast_ref::<std::io::Error>()
+                .is_some_and(|e| e.kind() == std::io::ErrorKind::ResourceBusy)
+        }) {
+            return result;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(ms));
+    }
+    op()
+}
+
 pub(super) fn detach(backing: &Path, mount: &Path) -> Result<()> {
+    retry_busy(|| detach_once(backing, mount))
+}
+
+pub(super) fn detach_once(backing: &Path, mount: &Path) -> Result<()> {
+    // A previous hdiutil call may have unmounted the volume without ejecting
+    // the device. Always look up the current device for this backing image.
     if let Some(image) = attached(backing)? {
         let (paths, dev) = points(&image)?;
-        if paths.is_empty() {
-            let dev = dev.context("missing image device")?;
-            hdi(&["detach".as_ref(), dev.as_ref()])?;
+        let target = if paths.is_empty() {
+            ensure!(
+                !mounted(mount)?,
+                "another image is mounted at {}",
+                mount.display()
+            );
+            OsStr::new(dev.as_deref().context("missing image device")?)
         } else {
             ensure!(
                 paths == [mount] && mounted(mount)?,
                 "image mounted at an unexpected location"
             );
             no_nested_mounts(mount)?;
-            hdi(&["detach".as_ref(), mount.as_os_str()])?;
+            mount.as_os_str()
+        };
+        let out = Command::new("/usr/bin/hdiutil")
+            .env("LC_ALL", "C")
+            .arg("detach")
+            .arg(target)
+            .stdin(Stdio::null())
+            .output()?;
+        if !out.status.success() {
+            let message = String::from_utf8_lossy(&out.stderr);
+            if out.status.code() == Some(libc::EBUSY)
+                || message.to_ascii_lowercase().contains("resource busy")
+            {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::ResourceBusy,
+                    message.trim().to_owned(),
+                )
+                .into());
+            }
+            bail!("hdiutil detach: {}", message.trim());
         }
     }
     ensure!(

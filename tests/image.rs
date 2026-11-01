@@ -309,6 +309,27 @@ fn eight_new_registrations_share_one_mount() {
         assert_eq!(works[0].parent(), work.parent());
     }
     eprintln!("eight source-only fixture worktrees ready in {ready:?}");
-    output(image(&repo, &["remove", instance]));
+    // Keep a reader in the volume through the first normal eject request.
+    // A transient busy result must be retryable without forcing an unmount.
+    let reader = fs::File::open(works[0].join("file")).unwrap();
+    let owner = Path::new(instance).join("instance.json");
+    let hold = std::thread::spawn(move || {
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);
+        while std::time::Instant::now() < deadline {
+            if fs::read(&owner)
+                .ok()
+                .and_then(|bytes| serde_json::from_slice::<serde_json::Value>(&bytes).ok())
+                .is_some_and(|o| o["removing"] == true)
+            {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(25));
+        }
+        std::thread::sleep(std::time::Duration::from_millis(500));
+        drop(reader);
+    });
+    let removed = image(&repo, &["remove", instance]);
+    hold.join().unwrap();
+    output(removed);
     output(image(&repo, &["retire", seed]));
 }
