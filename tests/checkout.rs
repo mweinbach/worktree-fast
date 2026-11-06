@@ -49,7 +49,10 @@ impl Fixture {
         I: IntoIterator<Item = S>,
         S: AsRef<OsStr>,
     {
-        let mut git = Command::new("git");
+        self.command(cwd, "git").args(args).output().unwrap()
+    }
+    fn command(&self, cwd: &Path, executable: &str) -> Command {
+        let mut git = Command::new(executable);
         for (key, _) in env::vars_os() {
             if key.to_string_lossy().starts_with("GIT_") {
                 git.env_remove(key);
@@ -61,10 +64,8 @@ impl Fixture {
             .env("XDG_CACHE_HOME", self.tmp.path().join("cache"))
             .env("XDG_CONFIG_HOME", self.tmp.path().join("config"))
             .env("GIT_CONFIG_NOSYSTEM", "1")
-            .env("WORKTREE_FAST_TRACE", "1")
-            .args(args)
-            .output()
-            .unwrap()
+            .env("WORKTREE_FAST_TRACE", "1");
+        git
     }
     fn git(&self, args: &[&str]) -> String {
         success(self.run(&self.repo, args))
@@ -103,6 +104,46 @@ fn unprepared_revision_uses_native_git_and_native_lifecycle() {
         "original\n"
     );
     f.git(&["worktree", "remove", path(&dest)]);
+}
+
+#[test]
+#[cfg(target_os = "macos")]
+fn failed_head_read_releases_only_its_staging_registration() {
+    let f = Fixture::new();
+    success(f.fast(&["prepare"]));
+    f.git(&["branch", "topic"]);
+    f.git(&["worktree", "add", "--detach", "../live"]);
+    f.git(&["worktree", "add", "--detach", "../missing"]);
+    fs::remove_dir_all(f.dest("missing")).unwrap();
+    let before = f.git(&["worktree", "list", "--porcelain"]);
+
+    let bin = f.dest("bin");
+    fs::create_dir(&bin).unwrap();
+    let shim = bin.join("git");
+    fs::write(
+        &shim,
+        r#"#!/bin/sh
+case "$PWD:$1:$2" in
+    */.worktree-fast-*/register/*:rev-parse:HEAD) echo "injected HEAD read failure" >&2; exit 1 ;;
+esac
+PATH="${PATH#*:}" exec git "$@"
+"#,
+    )
+    .unwrap();
+    fs::set_permissions(&shim, fs::Permissions::from_mode(0o755)).unwrap();
+    let mut paths = vec![bin];
+    paths.extend(env::split_paths(&f.path));
+    let dest = f.dest("target");
+    let result = f
+        .command(&f.repo, env!("CARGO_BIN_EXE_git-worktree-fast"))
+        .env("PATH", env::join_paths(paths).unwrap())
+        .args(["add", "--", path(&dest), "topic"])
+        .output()
+        .unwrap();
+    assert!(!result.status.success());
+    assert!(String::from_utf8_lossy(&result.stderr).contains("injected HEAD read failure"));
+    assert_eq!(f.git(&["worktree", "list", "--porcelain"]), before);
+    f.git(&["worktree", "add", "--", path(&dest), "topic"]);
 }
 
 #[test]

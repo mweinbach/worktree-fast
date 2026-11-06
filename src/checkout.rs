@@ -901,10 +901,12 @@ fn cached_add(
             .unwrap_or_else(|| 128 + registration.status.signal().unwrap_or(1));
         return Ok(Some(ExitCode::from(code as u8)));
     }
-    let actual = output(git().current_dir(&staged).args(["rev-parse", "HEAD"]))?;
-    let actual = std::str::from_utf8(&actual)?.trim_end();
+    let mut branch_tip = oid;
     let publish = (|| -> Result<Option<Output>> {
-        if actual != oid {
+        let raw = output(git().current_dir(&staged).args(["rev-parse", "HEAD"]))?;
+        let actual = std::str::from_utf8(&raw)?.trim_end();
+        if actual != branch_tip {
+            branch_tip = actual.to_owned();
             return Ok(None);
         }
         fs::rename(staged.join(".git"), payload.join(".git"))?;
@@ -949,16 +951,20 @@ fn cached_add(
         checked(moved)?;
         Ok(Some(reset))
     })();
-    if !matches!(publish, Ok(Some(_))) && staged.exists() {
-        output(
-            git()
-                .args(["worktree", "remove", "--force", "--"])
-                .arg(&staged),
-        )?;
+    if !matches!(publish, Ok(Some(_))) {
+        // Keep the private tempdir reserved, but vacate the registered path so
+        // Git only unlinks its metadata, even if the staged .git file was lost.
+        fs::rename(&container, tmp.path().join("discard"))?;
+        output(git().args(["worktree", "remove", "--"]).arg(&staged))?;
         if let Some(created) = form.branch.or(implicit_new) {
             let mut branch = OsString::from("refs/heads/");
             branch.push(created);
-            output(git().args(["update-ref", "-d"]).arg(branch).arg(actual))?;
+            output(
+                git()
+                    .args(["update-ref", "-d"])
+                    .arg(branch)
+                    .arg(&branch_tip),
+            )?;
         }
     }
     let Some(reset) = publish? else {
